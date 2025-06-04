@@ -9,6 +9,8 @@ import uuid
 import traceback
 import ctypes
 import threading
+import psutil
+import subprocess
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QSystemTrayIcon, 
@@ -21,6 +23,7 @@ import aiohttp
 import win32con
 import win32api
 import win32gui
+import win32process
 
 # Configure logging
 logging.basicConfig(
@@ -336,10 +339,17 @@ class KeyboardBlocker:
     def __init__(self):
         self.hooked = None
         self.enabled = False
+        self.lock_mode = False  # True = lock screen (strict), False = session mode (minimal)
     
-    def install(self):
+    def install(self, lock_mode=True):
+        """Install keyboard blocker
+        lock_mode=True: Lock screen mode (blocks Alt+Tab, Alt+F4, Windows keys)
+        lock_mode=False: Session mode (minimal blocking, let users game freely)
+        """
         if self.hooked or not ctypes.windll.kernel32.GetModuleHandleW:
             return
+        
+        self.lock_mode = lock_mode
         
         try:
             CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))
@@ -347,9 +357,60 @@ class KeyboardBlocker:
             def low_level_keyboard_proc(nCode, wParam, lParam):
                 if nCode == 0:
                     vk_code = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_ulong * 6))[0][0]
-                    # Block Windows keys and Ctrl+Esc
-                    if vk_code in (0x5B, 0x5C) or (vk_code == 0x1B and (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000)):
-                        return 1
+                    
+                    # Lock mode: Strict blocking when computer is locked
+                    if self.lock_mode:
+                        # Block Windows keys
+                        if vk_code in (0x5B, 0x5C):  # Left/Right Windows key
+                            logger.debug(f"🔒 Blocked Windows key on lock screen (VK: {vk_code})")
+                            return 1
+                        
+                        # Block Alt+Tab (switch applications)
+                        if vk_code == 0x09 and (win32api.GetAsyncKeyState(win32con.VK_MENU) & 0x8000):
+                            logger.debug("🔒 Blocked Alt+Tab on lock screen")
+                            return 1
+                        
+                        # Block Alt+F4 (close applications)
+                        if vk_code == 0x73 and (win32api.GetAsyncKeyState(win32con.VK_MENU) & 0x8000):
+                            logger.debug("🔒 Blocked Alt+F4 on lock screen")
+                            return 1
+                        
+                        # Block Ctrl+Esc (Start menu)
+                        if vk_code == 0x1B and (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000):
+                            logger.debug("🔒 Blocked Ctrl+Esc on lock screen")
+                            return 1
+                        
+                        # Block Ctrl+Shift+Esc (Task Manager)
+                        if (vk_code == 0x1B and 
+                            (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000) and
+                            (win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)):
+                            logger.debug("🔒 Blocked Ctrl+Shift+Esc on lock screen")
+                            return 1
+                        
+                        # Block Windows+L (Lock computer)
+                        if (vk_code == 0x4C and 
+                            ((win32api.GetAsyncKeyState(0x5B) & 0x8000) or 
+                             (win32api.GetAsyncKeyState(0x5C) & 0x8000))):
+                            logger.debug("🔒 Blocked Windows+L on lock screen")
+                            return 1
+                        
+                        # Block Windows+R (Run dialog)
+                        if (vk_code == 0x52 and 
+                            ((win32api.GetAsyncKeyState(0x5B) & 0x8000) or 
+                             (win32api.GetAsyncKeyState(0x5C) & 0x8000))):
+                            logger.debug("🔒 Blocked Windows+R on lock screen")
+                            return 1
+                    
+                    # Session mode: Minimal blocking - let users game normally
+                    # Only block the most critical system shortcuts
+                    else:
+                        # Only block Ctrl+Shift+Esc (Task Manager) during gaming
+                        if (vk_code == 0x1B and 
+                            (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000) and
+                            (win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)):
+                            logger.debug("🎮 Blocked Ctrl+Shift+Esc during gaming session")
+                            return 1
+                
                 return ctypes.windll.user32.CallNextHookEx(self.hooked, nCode, wParam, lParam)
             
             self.pointer = CMPFUNC(low_level_keyboard_proc)
@@ -362,7 +423,9 @@ class KeyboardBlocker:
             
             self.thread = threading.Thread(target=msg_loop, daemon=True)
             self.thread.start()
-            logger.info("Keyboard blocker installed")
+            
+            mode_str = "Lock mode (strict)" if lock_mode else "Gaming mode (minimal)"
+            logger.info(f"🔐 Keyboard blocker installed ({mode_str})")
         except Exception as e:
             logger.error(f"Failed to install keyboard blocker: {e}")
     
@@ -372,9 +435,170 @@ class KeyboardBlocker:
                 ctypes.windll.user32.UnhookWindowsHookEx(self.hooked)
                 self.hooked = None
                 self.enabled = False
-                logger.info("Keyboard blocker uninstalled")
+                self.lock_mode = False
+                logger.info("🔐 Keyboard blocker uninstalled")
             except Exception as e:
                 logger.error(f"Failed to uninstall keyboard blocker: {e}")
+
+class FolderBlocker:
+    """Blocks access to file manager and folders during gaming sessions"""
+    
+    def __init__(self):
+        self.enabled = False
+        self.monitor_thread = None
+        self.blocked_processes = [
+            'explorer.exe',      # Windows Explorer
+            'cmd.exe',          # Command Prompt  
+            'powershell.exe',   # PowerShell
+            'winfile.exe',      # File Manager (old)
+            'regedit.exe',      # Registry Editor
+            'taskmgr.exe',      # Task Manager
+            'msconfig.exe',     # System Configuration
+            'control.exe',      # Control Panel
+            'mmc.exe'           # Microsoft Management Console
+        ]
+        self.allowed_games = [
+            # Add common gaming processes that should be allowed
+            'steam.exe', 'steamwebhelper.exe', 'gameoverlayui.exe',
+            'origin.exe', 'originwebhelperservice.exe',
+            'epicgameslauncher.exe', 'epicgameslauncher-win32-shipping.exe',
+            'battle.net.exe', 'agent.exe',
+            'uplay.exe', 'upc.exe',
+            'discord.exe', 'discordptb.exe',
+            # Web browsers for gaming
+            'chrome.exe', 'firefox.exe', 'msedge.exe',
+            # Common games (can be expanded)
+            'csgo.exe', 'dota2.exe', 'league of legends.exe', 'valorant.exe'
+        ]
+    
+    def install(self):
+        """Start monitoring and blocking folder access"""
+        if self.enabled:
+            return
+            
+        self.enabled = True
+        self.monitor_thread = threading.Thread(target=self._monitor_processes, daemon=True)
+        self.monitor_thread.start()
+        logger.info("🛡️  Folder blocker installed - File system access restricted")
+    
+    def uninstall(self):
+        """Stop monitoring"""
+        self.enabled = False
+        if self.monitor_thread:
+            self.monitor_thread.join(timeout=1)
+            self.monitor_thread = None
+        logger.info("🛡️  Folder blocker uninstalled - File system access restored")
+    
+    def _monitor_processes(self):
+        """Monitor running processes and terminate blocked ones"""
+        blocked_count = 0
+        
+        while self.enabled:
+            try:
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                    if not self.enabled:
+                        break
+                        
+                    try:
+                        proc_name = proc.info['name'].lower()
+                        
+                        # Skip allowed processes
+                        if any(allowed in proc_name for allowed in self.allowed_games):
+                            continue
+                        
+                        # Check if process should be blocked
+                        if any(blocked in proc_name for blocked in self.blocked_processes):
+                            # Don't kill the main Windows explorer (shell)
+                            if proc_name == 'explorer.exe':
+                                # Check if it's a folder window (not the desktop shell)
+                                if self._is_folder_explorer_window(proc.info['pid']):
+                                    proc.terminate()
+                                    blocked_count += 1
+                                    logger.info(f"🚫 Blocked folder access: {proc_name} (PID: {proc.info['pid']})")
+                            else:
+                                proc.terminate()
+                                blocked_count += 1
+                                logger.info(f"🚫 Blocked system tool: {proc_name} (PID: {proc.info['pid']})")
+                        
+                        # Block new folder windows by checking window titles
+                        elif proc_name == 'explorer.exe':
+                            if self._check_explorer_windows():
+                                blocked_count += 1
+                    
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+                
+                # Log summary periodically
+                if blocked_count > 0 and blocked_count % 5 == 0:
+                    logger.info(f"🛡️  Gaming session protected - {blocked_count} access attempts blocked")
+                
+                # Check every 2 seconds
+                for _ in range(20):
+                    if not self.enabled:
+                        break
+                    threading.Event().wait(0.1)
+                        
+            except Exception as e:
+                logger.error(f"Folder blocker error: {e}")
+                threading.Event().wait(1)
+    
+    def _is_folder_explorer_window(self, pid):
+        """Check if explorer.exe process is a folder window"""
+        try:
+            # Get windows for this process
+            def enum_windows_callback(hwnd, windows):
+                if win32gui.IsWindowVisible(hwnd):
+                    _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if window_pid == pid:
+                        window_title = win32gui.GetWindowText(hwnd)
+                        class_name = win32gui.GetClassName(hwnd)
+                        windows.append((hwnd, window_title, class_name))
+                return True
+            
+            windows = []
+            win32gui.EnumWindows(enum_windows_callback, windows)
+            
+            for hwnd, title, class_name in windows:
+                # Check for typical folder window indicators
+                if (class_name == 'CabinetWClass' or  # Standard folder window
+                    'Explorer' in class_name or
+                    any(folder_indicator in title.lower() for folder_indicator in 
+                        ['documents', 'downloads', 'desktop', 'pictures', 'music', 'videos', 
+                         'program files', 'windows', 'users', 'local disk', 'drive'])):
+                    return True
+            
+            return False
+        except Exception:
+            return False
+    
+    def _check_explorer_windows(self):
+        """Check for and close unauthorized explorer windows"""
+        try:
+            def enum_windows_callback(hwnd, windows):
+                if win32gui.IsWindowVisible(hwnd):
+                    window_title = win32gui.GetWindowText(hwnd)
+                    class_name = win32gui.GetClassName(hwnd)
+                    
+                    # Check for folder windows
+                    if (class_name == 'CabinetWClass' or
+                        any(folder_indicator in window_title.lower() for folder_indicator in 
+                            ['documents', 'downloads', 'desktop', 'pictures', 'music', 'videos', 
+                             'program files', 'windows', 'users', 'local disk', 'drive', 'folder'])):
+                        try:
+                            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                            logger.info(f"🚫 Closed folder window: {window_title}")
+                            windows.append(hwnd)
+                        except Exception:
+                            pass
+                return True
+            
+            windows = []
+            win32gui.EnumWindows(enum_windows_callback, windows)
+            return len(windows) > 0
+            
+        except Exception as e:
+            logger.debug(f"Window check error: {e}")
+            return False
 
 class NetCafeClient:
     def __init__(self):
@@ -389,6 +613,7 @@ class NetCafeClient:
         self.timer_overlay = TimerOverlay()
         self.lock_screen = LockScreen()
         self.keyboard_blocker = KeyboardBlocker()
+        self.folder_blocker = FolderBlocker()  # Add folder blocker
         
         # State
         self.session_active = False
@@ -522,7 +747,7 @@ class NetCafeClient:
     
     def _show_lock_screen(self):
         self.lock_screen.show_lock()
-        self.keyboard_blocker.install()
+        self.keyboard_blocker.install(lock_mode=True)  # Strict blocking on lock screen
     
     def _hide_lock_screen(self):
         self.lock_screen.hide_lock()
@@ -558,6 +783,7 @@ class NetCafeClient:
             self.session_timer.stop()
             self.reconnect_timer.stop()
             self.keyboard_blocker.uninstall()
+            self.folder_blocker.uninstall()  # Cleanup folder blocker
             
             # Cleanup async resources if event loop is still running
             try:
@@ -690,6 +916,11 @@ class NetCafeClient:
             self._notified_1min = False
             
             self._hide_lock_screen()
+            
+            # Gaming session: Only minimal keyboard blocking + folder blocking
+            self.keyboard_blocker.install(lock_mode=False)  # Minimal blocking during gaming
+            self.folder_blocker.install()  # Block folder access during session
+            
             self._show_overlay()
             self._update_timer()
             
@@ -697,7 +928,7 @@ class NetCafeClient:
             
             self.tray.showMessage(
                 '🎮 NetCafe Pro 2.0',
-                f'Gaming session started! {minutes} minutes available.',
+                f'Gaming session started! {minutes} minutes available.\n📁 Folder access blocked.',
                 QSystemTrayIcon.Information,
                 5000
             )
@@ -731,17 +962,21 @@ class NetCafeClient:
             self.session_timer.stop()
             self.timer_overlay.hide()
             
+            # Uninstall session protections
+            self.keyboard_blocker.uninstall()
+            self.folder_blocker.uninstall()
+            
             # Cancel WebSocket task if running
             if self.ws_task and not self.ws_task.done():
                 self.ws_task.cancel()
             
-            self._show_lock_screen()
+            self._show_lock_screen()  # This will install strict lock-mode keyboard blocker
             
             self.set_status('Session ended', False)
             
             self.tray.showMessage(
                 '🎮 NetCafe Pro 2.0',
-                'Gaming session ended. Computer locked.',
+                'Gaming session ended. Computer locked.\n🔒 Full keyboard protection active.',
                 QSystemTrayIcon.Information,
                 3000
             )
