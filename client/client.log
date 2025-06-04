@@ -40,3 +40,31 @@ connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x0000021
 connector: <aiohttp.connector.TCPConnector object at 0x00000217AC43D6A0>
 2025-06-04 03:23:53,882 - qasync._QEventLoop - ERROR - Task was destroyed but it is pending!
 task: <Task pending name='Task-5' coro=<NetCafeClient._handle_ws_messages() running at C:\Users\pavka\Desktop\New folder (2)\client\netcafe_client.py:779>>
+2025-06-04 20:15:20,285 - __main__ - INFO - System tray initialized
+2025-06-04 20:15:20,368 - __main__ - INFO - 🔐 Keyboard blocker installed (Lock mode (strict))
+2025-06-04 20:15:20,368 - __main__ - INFO - NetCafe Client initialized. Computer ID: DESKTOP-AU7O0H3_190032518091308
+2025-06-04 20:15:20,370 - __main__ - INFO - Status: Initializing... (Connected: False)
+2025-06-04 20:15:20,370 - __main__ - INFO - 🎮 Starting NetCafe Pro 2.0 Gaming Client
+2025-06-04 20:15:20,383 - __main__ - INFO - Connecting to server: http://192.168.7.2:8080
+2025-06-04 20:15:20,387 - __main__ - INFO - Status: Connecting to server... (Connected: False)
+2025-06-04 20:15:30,563 - __main__ - ERROR - Connection error: 
+2025-06-04 20:15:30,564 - __main__ - INFO - Trying next host: 127.0.0.1
+2025-06-04 20:15:30,566 - __main__ - INFO - Status: Connection failed (attempt 1) (Connected: False)
+2025-06-04 20:15:30,568 - __main__ - INFO - Reconnecting in 8.0s
+2025-06-04 20:15:38,558 - __main__ - INFO - Attempting reconnection...
+2025-06-04 20:15:38,559 - __main__ - INFO - Connecting to server: http://127.0.0.1:8080
+2025-06-04 20:15:38,561 - __main__ - INFO - Status: Connecting to server... (Connected: False)
+2025-06-04 20:15:49,558 - __main__ - ERROR - Connection error: 
+2025-06-04 20:15:49,558 - __main__ - INFO - Trying next host: localhost
+2025-06-04 20:15:49,560 - __main__ - INFO - Status: Connection failed (attempt 2) (Connected: False)
+2025-06-04 20:15:49,563 - __main__ - INFO - Reconnecting in 11.0s
+2025-06-04 20:16:00,566 - __main__ - INFO - Attempting reconnection...
+2025-06-04 20:16:00,566 - __main__ - INFO - Connecting to server: http://localhost:8080
+2025-06-04 20:16:00,568 - __main__ - INFO - Status: Connecting to server... (Connected: False)
+2025-06-04 20:16:11,552 - __main__ - ERROR - Connection error: 
+2025-06-04 20:16:11,552 - __main__ - INFO - Trying next host: 192.168.7.2
+2025-06-04 20:16:11,557 - __main__ - INFO - Status: Connection failed (attempt 3) (Connected: False)
+2025-06-04 20:16:11,558 - __main__ - INFO - Reconnecting in 14.0s
+2025-06-04 20:16:20,749 - __main__ - INFO - 🛡️  Folder blocker uninstalled - File system access restored
+2025-06-04 20:16:20,750 - __main__ - INFO - Event loop not running, skipping async cleanup
+2025-06-04 20:16:20,784 - __main__ - INFO - Cleanup completed

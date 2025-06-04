@@ -340,103 +340,170 @@ class KeyboardBlocker:
         self.hooked = None
         self.enabled = False
         self.lock_mode = False  # True = lock screen (strict), False = session mode (minimal)
+        self.pointer = None
+        self.thread = None
     
     def install(self, lock_mode=True):
         """Install keyboard blocker
         lock_mode=True: Lock screen mode (blocks Alt+Tab, Alt+F4, Windows keys)
         lock_mode=False: Session mode (minimal blocking, let users game freely)
         """
-        if self.hooked or not ctypes.windll.kernel32.GetModuleHandleW:
-            return
+        if self.hooked:
+            self.uninstall()  # Uninstall previous hook first
         
         self.lock_mode = lock_mode
         
         try:
-            CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))
+            # Import required Windows APIs
+            from ctypes import wintypes
+            
+            # Define hook function type
+            HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+            
+            # Get required DLLs
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            
+            # Constants for low-level keyboard hook
+            WH_KEYBOARD_LL = 13
+            WM_KEYDOWN = 0x0100
+            WM_SYSKEYDOWN = 0x0104
             
             def low_level_keyboard_proc(nCode, wParam, lParam):
-                if nCode == 0:
-                    vk_code = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_ulong * 6))[0][0]
-                    
-                    # Lock mode: Strict blocking when computer is locked
-                    if self.lock_mode:
-                        # Block Windows keys
-                        if vk_code in (0x5B, 0x5C):  # Left/Right Windows key
-                            logger.debug(f"🔒 Blocked Windows key on lock screen (VK: {vk_code})")
-                            return 1
-                        
-                        # Block Alt+Tab (switch applications)
-                        if vk_code == 0x09 and (win32api.GetAsyncKeyState(win32con.VK_MENU) & 0x8000):
-                            logger.debug("🔒 Blocked Alt+Tab on lock screen")
-                            return 1
-                        
-                        # Block Alt+F4 (close applications)
-                        if vk_code == 0x73 and (win32api.GetAsyncKeyState(win32con.VK_MENU) & 0x8000):
-                            logger.debug("🔒 Blocked Alt+F4 on lock screen")
-                            return 1
-                        
-                        # Block Ctrl+Esc (Start menu)
-                        if vk_code == 0x1B and (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000):
-                            logger.debug("🔒 Blocked Ctrl+Esc on lock screen")
-                            return 1
-                        
-                        # Block Ctrl+Shift+Esc (Task Manager)
-                        if (vk_code == 0x1B and 
-                            (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000) and
-                            (win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)):
-                            logger.debug("🔒 Blocked Ctrl+Shift+Esc on lock screen")
-                            return 1
-                        
-                        # Block Windows+L (Lock computer)
-                        if (vk_code == 0x4C and 
-                            ((win32api.GetAsyncKeyState(0x5B) & 0x8000) or 
-                             (win32api.GetAsyncKeyState(0x5C) & 0x8000))):
-                            logger.debug("🔒 Blocked Windows+L on lock screen")
-                            return 1
-                        
-                        # Block Windows+R (Run dialog)
-                        if (vk_code == 0x52 and 
-                            ((win32api.GetAsyncKeyState(0x5B) & 0x8000) or 
-                             (win32api.GetAsyncKeyState(0x5C) & 0x8000))):
-                            logger.debug("🔒 Blocked Windows+R on lock screen")
-                            return 1
-                    
-                    # Session mode: Minimal blocking - let users game normally
-                    # Only block the most critical system shortcuts
-                    else:
-                        # Only block Ctrl+Shift+Esc (Task Manager) during gaming
-                        if (vk_code == 0x1B and 
-                            (win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000) and
-                            (win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)):
-                            logger.debug("🎮 Blocked Ctrl+Shift+Esc during gaming session")
-                            return 1
+                if not self.enabled:
+                    return user32.CallNextHookExW(self.hooked, nCode, wParam, lParam)
                 
-                return ctypes.windll.user32.CallNextHookEx(self.hooked, nCode, wParam, lParam)
+                if nCode == 0:  # HC_ACTION
+                    # Get virtual key code from lParam structure
+                    vk_code = ctypes.cast(lParam, ctypes.POINTER(wintypes.DWORD))[0]
+                    
+                    # Only process key down events
+                    if wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                        
+                        # Lock mode: Strict blocking when computer is locked
+                        if self.lock_mode:
+                            # Block Windows keys (Left: 0x5B, Right: 0x5C)
+                            if vk_code in (0x5B, 0x5C):
+                                logger.info(f"🔒 BLOCKED Windows key on lock screen (VK: {vk_code})")
+                                return 1
+                            
+                            # Block Alt+Tab (Tab: 0x09 with Alt modifier)
+                            if vk_code == 0x09 and user32.GetAsyncKeyState(0x12) & 0x8000:  # Alt key
+                                logger.info("🔒 BLOCKED Alt+Tab on lock screen")
+                                return 1
+                            
+                            # Block Alt+F4 (F4: 0x73 with Alt modifier)
+                            if vk_code == 0x73 and user32.GetAsyncKeyState(0x12) & 0x8000:  # Alt key
+                                logger.info("🔒 BLOCKED Alt+F4 on lock screen")
+                                return 1
+                            
+                            # Block Ctrl+Esc (Esc: 0x1B with Ctrl modifier)
+                            if vk_code == 0x1B and user32.GetAsyncKeyState(0x11) & 0x8000:  # Ctrl key
+                                logger.info("🔒 BLOCKED Ctrl+Esc on lock screen")
+                                return 1
+                            
+                            # Block Ctrl+Shift+Esc (Task Manager)
+                            if (vk_code == 0x1B and 
+                                user32.GetAsyncKeyState(0x11) & 0x8000 and  # Ctrl
+                                user32.GetAsyncKeyState(0x10) & 0x8000):    # Shift
+                                logger.info("🔒 BLOCKED Ctrl+Shift+Esc on lock screen")
+                                return 1
+                            
+                            # Block Windows+L (Lock computer: L with Windows key)
+                            if (vk_code == 0x4C and 
+                                (user32.GetAsyncKeyState(0x5B) & 0x8000 or 
+                                 user32.GetAsyncKeyState(0x5C) & 0x8000)):
+                                logger.info("🔒 BLOCKED Windows+L on lock screen")
+                                return 1
+                            
+                            # Block Windows+R (Run dialog: R with Windows key)
+                            if (vk_code == 0x52 and 
+                                (user32.GetAsyncKeyState(0x5B) & 0x8000 or 
+                                 user32.GetAsyncKeyState(0x5C) & 0x8000)):
+                                logger.info("🔒 BLOCKED Windows+R on lock screen")
+                                return 1
+                            
+                            # Block Windows+D (Show desktop)
+                            if (vk_code == 0x44 and 
+                                (user32.GetAsyncKeyState(0x5B) & 0x8000 or 
+                                 user32.GetAsyncKeyState(0x5C) & 0x8000)):
+                                logger.info("🔒 BLOCKED Windows+D on lock screen")  
+                                return 1
+                        
+                        # Session mode: Minimal blocking - let users game normally
+                        else:
+                            # Only block Ctrl+Shift+Esc (Task Manager) during gaming
+                            if (vk_code == 0x1B and 
+                                user32.GetAsyncKeyState(0x11) & 0x8000 and  # Ctrl
+                                user32.GetAsyncKeyState(0x10) & 0x8000):    # Shift
+                                logger.info("🎮 BLOCKED Ctrl+Shift+Esc during gaming session")
+                                return 1
+                
+                return user32.CallNextHookExW(self.hooked, nCode, wParam, lParam)
             
-            self.pointer = CMPFUNC(low_level_keyboard_proc)
-            self.hooked = ctypes.windll.user32.SetWindowsHookExA(13, self.pointer, ctypes.windll.kernel32.GetModuleHandleW(None), 0)
+            # Create hook function
+            self.pointer = HOOKPROC(low_level_keyboard_proc)
+            
+            # Install the hook
+            self.hooked = user32.SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                self.pointer,
+                kernel32.GetModuleHandleW(None),
+                0
+            )
+            
+            if not self.hooked:
+                raise Exception(f"SetWindowsHookEx failed: {ctypes.get_last_error()}")
+            
             self.enabled = True
             
-            def msg_loop():
-                while self.enabled:
-                    ctypes.windll.user32.PeekMessageW(None, 0, 0, 0, 0)
+            # Start message pump in separate thread
+            def message_pump():
+                msg = wintypes.MSG()
+                bRet = wintypes.BOOL()
+                
+                while self.enabled and self.hooked:
+                    try:
+                        bRet = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                        if bRet == 0 or bRet == -1:  # WM_QUIT or error
+                            break
+                        user32.TranslateMessage(ctypes.byref(msg))
+                        user32.DispatchMessageW(ctypes.byref(msg))
+                    except Exception as e:
+                        logger.error(f"Message pump error: {e}")
+                        break
             
-            self.thread = threading.Thread(target=msg_loop, daemon=True)
+            self.thread = threading.Thread(target=message_pump, daemon=True)
             self.thread.start()
             
-            mode_str = "Lock mode (strict)" if lock_mode else "Gaming mode (minimal)"
-            logger.info(f"🔐 Keyboard blocker installed ({mode_str})")
+            mode_str = "Lock mode (strict blocking)" if lock_mode else "Gaming mode (minimal blocking)"
+            logger.info(f"🔐 Keyboard blocker installed successfully ({mode_str})")
+            
+            # Test that blocking is working
+            if lock_mode:
+                logger.info("🔒 LOCK SCREEN PROTECTION ACTIVE - Alt+Tab, Alt+F4, Windows keys BLOCKED")
+            else:
+                logger.info("🎮 GAMING PROTECTION ACTIVE - Only Task Manager blocked")
+                
         except Exception as e:
-            logger.error(f"Failed to install keyboard blocker: {e}")
+            logger.error(f"❌ Failed to install keyboard blocker: {e}")
+            logger.error(f"Error details: {traceback.format_exc()}")
+            logger.warning("⚠️  Running without administrator privileges may cause blocking to fail!")
+            self.enabled = False
     
     def uninstall(self):
         if self.hooked:
             try:
+                self.enabled = False
                 ctypes.windll.user32.UnhookWindowsHookEx(self.hooked)
                 self.hooked = None
-                self.enabled = False
-                self.lock_mode = False
-                logger.info("🔐 Keyboard blocker uninstalled")
+                self.pointer = None
+                
+                # Stop message pump thread
+                if self.thread and self.thread.is_alive():
+                    self.thread.join(timeout=1)
+                    
+                logger.info("🔐 Keyboard blocker uninstalled successfully")
             except Exception as e:
                 logger.error(f"Failed to uninstall keyboard blocker: {e}")
 
