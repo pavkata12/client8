@@ -850,22 +850,46 @@ class NetCafeClient:
             self.session_timer.stop()
             self.reconnect_timer.stop()
             self.keyboard_blocker.uninstall()
-            self.folder_blocker.uninstall()  # Cleanup folder blocker
+            self.folder_blocker.uninstall()
             
-            # Cleanup async resources if event loop is still running
+            # Improved async resource cleanup
             try:
-                loop = asyncio.get_running_loop()
-                if loop and not loop.is_closed():
-                    # Cancel WebSocket task
+                # Check if event loop is running
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop_running = True
+                except RuntimeError:
+                    loop_running = False
+                
+                if loop_running and hasattr(self, 'loop') and not self.loop.is_closed():
+                    # Cancel WebSocket task with proper waiting
                     if self.ws_task and not self.ws_task.done():
                         self.ws_task.cancel()
+                        try:
+                            # Wait for task cancellation with timeout
+                            asyncio.wait_for(self.ws_task, timeout=2.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            pass  # Expected for cancelled tasks
                     
-                    # Close session
+                    # Close session gracefully
                     if self.session and not self.session.closed:
-                        loop.create_task(self.session.close())
-            except RuntimeError:
-                # Event loop is not running, skip async cleanup
-                logger.info("Event loop not running, skipping async cleanup")
+                        try:
+                            # Create a task to close the session
+                            close_task = self.loop.create_task(self.session.close())
+                            # Don't wait for it to complete to avoid blocking
+                        except Exception as e:
+                            logger.debug(f"Session close task creation failed: {e}")
+                else:
+                    # Event loop not running, force cleanup
+                    if self.session and not self.session.closed:
+                        try:
+                            # Try to close synchronously if possible
+                            self.session._connector_owner = False
+                            self.session._connector = None
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.debug(f"Async cleanup handled: {e}")
             
             self.tray.hide()
             logger.info("Cleanup completed")
@@ -1077,15 +1101,32 @@ class NetCafeClient:
             )
         
         if self.remaining_time <= 0:
-            # Safely create task within the existing event loop
+            # Improved task creation with better error handling
             try:
-                if hasattr(self, 'loop') and not self.loop.is_closed():
-                    self.loop.create_task(self._end_session())
-                else:
-                    # Fallback if loop is not available
-                    asyncio.create_task(self._end_session())
-            except RuntimeError:
-                logger.warning("Unable to end session: event loop not available")
+                # Check if we're in the event loop context
+                try:
+                    current_task = asyncio.current_task()
+                    if current_task and hasattr(self, 'loop') and not self.loop.is_closed():
+                        # We're in an async context, use loop.create_task
+                        self.loop.create_task(self._end_session())
+                    else:
+                        # Not in async context, queue for later execution
+                        if hasattr(self, 'loop') and not self.loop.is_closed():
+                            # Use call_soon_threadsafe for cross-thread safety
+                            self.loop.call_soon_threadsafe(
+                                lambda: self.loop.create_task(self._end_session())
+                            )
+                except RuntimeError:
+                    # No current task, try direct task creation
+                    if hasattr(self, 'loop') and not self.loop.is_closed():
+                        self.loop.create_task(self._end_session())
+                    else:
+                        logger.warning("Unable to end session: no event loop available")
+            except Exception as e:
+                logger.error(f"Failed to schedule session end: {e}")
+                # Force end session synchronously as last resort
+                self.session_active = False
+                self._show_lock_screen()
             return
         
         self._update_timer()
@@ -1116,6 +1157,8 @@ class NetCafeClient:
                         await self._process_ws_message(data)
                     except json.JSONDecodeError:
                         logger.error("Invalid WebSocket message")
+                    except Exception as e:
+                        logger.error(f"Message processing error: {e}")
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     logger.error(f"WebSocket error: {self.ws.exception()}")
                     break
@@ -1127,14 +1170,25 @@ class NetCafeClient:
             raise
         except Exception as e:
             logger.error(f"WebSocket handler error: {e}")
+            # Include traceback for better debugging
+            logger.debug(f"WebSocket error traceback: {traceback.format_exc()}")
         finally:
-            self.ws = None
-            self.ws_task = None
-            self.set_status('Disconnected', False)
-            
-            # Only start reconnect if not cancelled
-            if not asyncio.current_task().cancelled():
-                self._start_reconnect_timer()
+            # Safe cleanup
+            try:
+                self.ws = None
+                self.ws_task = None
+                self.set_status('Disconnected', False)
+                
+                # Check if task was cancelled before starting reconnect
+                try:
+                    current_task = asyncio.current_task()
+                    if current_task and not current_task.cancelled():
+                        self._start_reconnect_timer()
+                except RuntimeError:
+                    # No current task context
+                    self._start_reconnect_timer()
+            except Exception as e:
+                logger.error(f"WebSocket cleanup error: {e}")
     
     async def _process_ws_message(self, data):
         msg_type = data.get('type')
