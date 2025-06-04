@@ -1,0 +1,42 @@
+2025-06-04 02:20:09,732 - __main__ - INFO - System tray initialized
+2025-06-04 02:20:09,807 - __main__ - INFO - Keyboard blocker installed
+2025-06-04 02:20:09,808 - __main__ - INFO - NetCafe Client initialized. Computer ID: DESKTOP-AU7O0H3_190032518091308
+2025-06-04 02:20:09,811 - __main__ - INFO - Status: Initializing... (Connected: False)
+2025-06-04 02:20:09,932 - __main__ - INFO - Connecting to server: http://localhost:8080
+2025-06-04 02:20:09,933 - __main__ - INFO - Status: Connecting to server... (Connected: False)
+2025-06-04 02:20:12,294 - __main__ - ERROR - Connection error: Cannot connect to host localhost:8080 ssl:default [The remote computer refused the network connection]
+2025-06-04 02:20:12,295 - __main__ - INFO - Status: Connection failed (attempt 1) (Connected: False)
+2025-06-04 02:20:12,306 - __main__ - INFO - Reconnecting in 8.0s
+2025-06-04 02:20:20,305 - __main__ - INFO - Attempting reconnection...
+2025-06-04 02:20:20,305 - __main__ - INFO - Connecting to server: http://localhost:8080
+2025-06-04 02:20:20,306 - __main__ - INFO - Status: Connecting to server... (Connected: False)
+2025-06-04 02:20:22,561 - __main__ - ERROR - Connection error: Cannot connect to host localhost:8080 ssl:default [The remote computer refused the network connection]
+2025-06-04 02:20:22,562 - __main__ - INFO - Status: Connection failed (attempt 2) (Connected: False)
+2025-06-04 02:20:22,563 - __main__ - INFO - Reconnecting in 11.0s
+2025-06-04 02:20:25,923 - __main__ - INFO - Cleanup completed
+2025-06-04 03:23:33,466 - __main__ - INFO - System tray initialized
+2025-06-04 03:23:33,536 - __main__ - INFO - Keyboard blocker installed
+2025-06-04 03:23:33,536 - __main__ - INFO - NetCafe Client initialized. Computer ID: DESKTOP-AU7O0H3_190032518091308
+2025-06-04 03:23:33,537 - __main__ - INFO - Status: Initializing... (Connected: False)
+2025-06-04 03:23:33,537 - __main__ - INFO - Starting NetCafe Pro 2.0 Gaming Client
+2025-06-04 03:23:33,545 - __main__ - INFO - Connecting to server: http://localhost:8080
+2025-06-04 03:23:33,547 - __main__ - INFO - Status: Connecting to server... (Connected: False)
+2025-06-04 03:23:33,842 - __main__ - INFO - Server is reachable
+2025-06-04 03:23:33,844 - __main__ - INFO - WebSocket connected
+2025-06-04 03:23:33,845 - __main__ - INFO - Status: Connected - Ready for gaming! (Connected: True)
+2025-06-04 03:23:33,867 - qasync._QEventLoop - ERROR - Exception in callback <_asyncio.TaskStepMethWrapper object at 0x00000217AC2B05B0>()
+handle: <Handle <_asyncio.TaskStepMethWrapper object at 0x00000217AC2B05B0>()>
+Traceback (most recent call last):
+  File "C:\Python313\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot enter into task <Task pending name='Task-5' coro=<NetCafeClient._handle_ws_messages() running at C:\Users\pavka\Desktop\New folder (2)\client\netcafe_client.py:779>> while another task <Task pending name='Task-1' coro=<NetCafeClient.connect_to_server() running at C:\Users\pavka\Desktop\New folder (2)\client\netcafe_client.py:601>> is being executed.
+2025-06-04 03:23:50,756 - __main__ - INFO - Authenticating user: admin
+2025-06-04 03:23:53,691 - __main__ - ERROR - Cleanup error: no running event loop
+2025-06-04 03:23:53,879 - qasync._QEventLoop - ERROR - Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x00000217AC43D550>
+2025-06-04 03:23:53,881 - qasync._QEventLoop - ERROR - Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x00000217C6D1D1F0>, 954133.4586738)])']
+connector: <aiohttp.connector.TCPConnector object at 0x00000217AC43D6A0>
+2025-06-04 03:23:53,882 - qasync._QEventLoop - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-5' coro=<NetCafeClient._handle_ws_messages() running at C:\Users\pavka\Desktop\New folder (2)\client\netcafe_client.py:779>>
