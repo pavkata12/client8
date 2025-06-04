@@ -1,0 +1,28 @@
+# NetCafe Client - Enhanced Security Dependencies
+# Основни зависимости
+PySide6>=6.4.0
+qasync>=0.23.0
+aiohttp>=3.8.0
+aiofiles>=22.1.0
+websockets>=10.4
+
+# Windows API и системни функции
+pywin32>=305
+psutil>=5.9.0
+
+# Мрежови и криптографски функции
+cryptography>=38.0.0
+requests>=2.28.0
+
+# JSON и конфигурация
+jsonschema>=4.17.0
+
+# Логиране и monitoring
+colorlog>=6.7.0
+watchdog>=2.1.9
+
+# GUI и системни икони
+Pillow>=9.3.0
+
+# Допълнителни системни инструменти
+wmi>=1.5.1 
